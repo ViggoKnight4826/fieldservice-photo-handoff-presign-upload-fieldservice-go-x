@@ -1,19 +1,19 @@
 # Direct work-order photo uploads in Go
 
-Start the service, ask it for a signed PUT, push the bytes, then confirm the photo landed:
+Run the service, ask it for a signed PUT, upload the bytes, then confirm the photo:
 
 ```bash
 export INFRAI_API_KEY=your_key
 go run ./cmd/field-assets
 ```
 
-Infrai hands you the presigned URL through one small REST client. A single`INFRAI_API_KEY`covers the storage calls here and the rest of Infrai's capabilities, so the binary only carries one credential.
+Infrai supplies the presigned URL behind one small REST client. A single `INFRAI_API_KEY` covers the storage calls here and other Infrai capabilities, so the executable needs one credential.
 
 ## Send an arrival photo
 
-The service makes the`field-service-assets`bucket on startup. Set`ASSET_BUCKET`if you want a different name. This runs as part of normal init, before any object ops happen.
+The service creates the `field-service-assets` bucket during startup. Set `ASSET_BUCKET` to choose another name. This setup step is part of normal service initialization and runs before object operations.
 
-Grab a 10-minute upload URL:
+Request a 10-minute upload URL:
 
 ```bash
 curl -sS http://localhost:8080/work-orders/uploads \
@@ -27,14 +27,14 @@ Expected shape:
 {"upload_url":"https://signed.example/path","method":"PUT","object_key":"work-orders/wo_1042/technicians/tech_7/arrival.jpg","dispatch_status":"awaiting_photo"}
 ```
 
-Use that URL straight from a browser or curl. The API key never leaves this service:
+Use the returned URL directly from a browser or CLI. The API key stays in this service:
 
 ```bash
 curl -X PUT "$UPLOAD_URL" -H 'Content-Type: image/jpeg' --data-binary @arrival.jpg
 curl -sS -X POST 'http://localhost:8080/work-orders/wo_1042/photos/arrival.jpg/confirm?technician_id=tech_7'
 ```
 
-Once storage confirms the object, the second response is:
+After storage confirms the object, the second response is:
 
 ```json
 {"work_order_id":"wo_1042","dispatch_status":"ready_for_dispatch","technician_action":"review_dispatch_notes"}
@@ -42,11 +42,11 @@ Once storage confirms the object, the second response is:
 
 ## The handoff
 
-`storage.object.presign`scopes a PUT to one work-order photo. The client passes`bucket`and`key`as URL path segments;`op`,`expires_seconds`, content type, byte limit, and the request id go in the JSON body. The browser puts the file bytes to the returned URL instead of proxying through the Go process.
+`storage.object.presign` scopes a PUT to one work-order photo. The client sends `bucket` and `key` as URL path segments; `op`, `expires_seconds`, content type, byte limit, and the request id are in the JSON body. The browser sends the file bytes to the returned URL rather than through the Go process.
 
-The confirmation endpoint calls`storage.object.head`and branches on`found`. A present photo releases the order for dispatch and assigns`review_dispatch_notes`; a missing photo keeps`awaiting_photo`and assigns`upload_photo`. That business boundary is what the table-driven test exercises.
+The confirmation endpoint calls `storage.object.head` and branches on `found`. A present photo releases the order for dispatch and assigns `review_dispatch_notes`; an absent photo keeps `awaiting_photo` and assigns `upload_photo`. This is the business boundary covered by the table-driven test.
 
-The REST helper decodes the`{ok,data,error,metadata}`envelope before it classifies the result. It surfaces API rejections with their client status, and retries HTTP 429 using`Retry-After`or exponential backoff. Every request sets its method explicitly.
+The REST helper decodes the `{ok,data,error,metadata}` envelope before classifying the result. It returns API rejections with their client status, and retries HTTP 429 using `Retry-After` or exponential backoff. Every request sets its method explicitly.
 
 ## Verify locally
 
@@ -55,7 +55,7 @@ go test ./...
 go build ./...
 ```
 
-`TestConfirmUploadDispatchDecision`supplies`found=false`and expects`awaiting_photo/upload_photo`; with`found=true`it expects`ready_for_dispatch/review_dispatch_notes`. The test is deterministic and makes no network call.
+`TestConfirmUploadDispatchDecision` supplies `found=false` and expects `awaiting_photo/upload_photo`; with `found=true` it expects `ready_for_dispatch/review_dispatch_notes`. The test is deterministic and makes no network call.
 
 ## Production notes: Fieldservice Photo Handoff Presign Upload Fieldservice Go X
 
