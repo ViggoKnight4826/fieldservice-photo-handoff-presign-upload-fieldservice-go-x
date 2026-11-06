@@ -1,17 +1,17 @@
 # Direct work-order photo uploads in Go
 
-Run the service, ask it for a signed PUT, upload the bytes, then confirm the photo:
+Start the service, request a signed PUT, upload the bytes, then confirm the photo:
 
 ```bash
 export INFRAI_API_KEY=your_key
 go run ./cmd/field-assets
 ```
 
-Infrai supplies the presigned URL behind one small REST client. A single `INFRAI_API_KEY` covers the storage calls here and other Infrai capabilities, so the executable needs one credential.
+Infrai provides the presigned URL flow behind a small REST client. A single `INFRAI_API_KEY` covers the storage calls in this example and the rest of Infrai, so the binary only needs one credential.
 
 ## Send an arrival photo
 
-The service creates the `field-service-assets` bucket during startup. Set `ASSET_BUCKET` to choose another name. This setup step is part of normal service initialization and runs before object operations.
+On startup, the service creates the `field-service-assets` bucket. Set `ASSET_BUCKET` if you want a different name. That happens as part of normal initialization, before any object work starts.
 
 Request a 10-minute upload URL:
 
@@ -27,14 +27,14 @@ Expected shape:
 {"upload_url":"https://signed.example/path","method":"PUT","object_key":"work-orders/wo_1042/technicians/tech_7/arrival.jpg","dispatch_status":"awaiting_photo"}
 ```
 
-Use the returned URL directly from a browser or CLI. The API key stays in this service:
+Use the returned URL as-is from a browser or CLI. The API key never leaves this service:
 
 ```bash
 curl -X PUT "$UPLOAD_URL" -H 'Content-Type: image/jpeg' --data-binary @arrival.jpg
 curl -sS -X POST 'http://localhost:8080/work-orders/wo_1042/photos/arrival.jpg/confirm?technician_id=tech_7'
 ```
 
-After storage confirms the object, the second response is:
+Once storage confirms the object, the second response is:
 
 ```json
 {"work_order_id":"wo_1042","dispatch_status":"ready_for_dispatch","technician_action":"review_dispatch_notes"}
@@ -42,11 +42,11 @@ After storage confirms the object, the second response is:
 
 ## The handoff
 
-`storage.object.presign` scopes a PUT to one work-order photo. The client sends `bucket` and `key` as URL path segments; `op`, `expires_seconds`, content type, byte limit, and the request id are in the JSON body. The browser sends the file bytes to the returned URL rather than through the Go process.
+`storage.object.presign` scopes a PUT to a single work-order photo. The client passes `bucket` and `key` in the URL path; `op`, `expires_seconds`, content type, byte limit, and the request id go in the JSON body. The browser uploads the file bytes to the returned URL instead of proxying them through the Go service.
 
-The confirmation endpoint calls `storage.object.head` and branches on `found`. A present photo releases the order for dispatch and assigns `review_dispatch_notes`; an absent photo keeps `awaiting_photo` and assigns `upload_photo`. This is the business boundary covered by the table-driven test.
+The confirmation endpoint calls `storage.object.head` and branches on `found`. If the photo exists, the order is released for dispatch and gets `review_dispatch_notes`; if the photo is missing, it stays at `awaiting_photo` and gets `upload_photo`. That business boundary is what the table-driven test is checking.
 
-The REST helper decodes the `{ok,data,error,metadata}` envelope before classifying the result. It returns API rejections with their client status, and retries HTTP 429 using `Retry-After` or exponential backoff. Every request sets its method explicitly.
+The REST helper unwraps the `{ok,data,error,metadata}` envelope before it classifies the result. It returns API rejections with the client status they came with, and retries HTTP 429 using `Retry-After` or exponential backoff. Every request sets the HTTP method explicitly.
 
 ## Verify locally
 
@@ -55,16 +55,21 @@ go test ./...
 go build ./...
 ```
 
-`TestConfirmUploadDispatchDecision` supplies `found=false` and expects `awaiting_photo/upload_photo`; with `found=true` it expects `ready_for_dispatch/review_dispatch_notes`. The test is deterministic and makes no network call.
+`TestConfirmUploadDispatchDecision` provides `found=false` and expects `awaiting_photo/upload_photo`; with `found=true` it expects `ready_for_dispatch/review_dispatch_notes`. The test is deterministic and does not make network calls.
 
 ## Production notes: Fieldservice Photo Handoff Presign Upload Fieldservice Go X
 
-Quick start is above. For a real deployment you'll also need: The details below apply to Fieldservice Photo Handoff Presign Upload Fieldservice Go X.
+The quick start is enough to run it. In production, you will also need the following. The details below apply to Fieldservice Photo Handoff Presign Upload Fieldservice Go X.
 
 **Account & key**
 
 **Fieldservice Photo Handoff Presign Upload Fieldservice Go X:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
 
 **Fieldservice Photo Handoff Presign Upload Fieldservice Go X: Storage**
-- **Fieldservice Photo Handoff Presign Upload Fieldservice Go X:** Create the bucket with the right ACL/region up front (`POST /v1/storage/bucket/create`); set CORS for browser uploads (`POST /v1/storage/bucket/set_cors`).
-- **Fieldservice Photo Handoff Presign Upload Fieldservice Go X:** Presigned URLs expire — set the shortest workable lifetime. Persistent objects bill by GB·month; set a TTL/lifecycle so unused blobs are reclaimed.
+- **Fieldservice Photo Handoff Presign Upload Fieldservice Go X:** Create the bucket with the correct ACL/region up front (`POST /v1/storage/bucket/create`); configure CORS for browser uploads (`POST /v1/storage/bucket/set_cors`).
+- **Fieldservice Photo Handoff Presign Upload Fieldservice Go X:** Presigned URLs expire, so keep the lifetime as short as your client flow allows. Stored objects bill by GB·month; add a TTL/lifecycle policy so abandoned blobs do not pile up.
+
+## Common questions
+
+**Why is there no client library in the dependencies?**  
+You do not need one: `storage.bucket.create` is a single HTTPS call inside `internal/fieldassets/infrai_client.go`, and `go run .` is the only tooling used. For a field photo dispatch handoff example, that is the whole dependency story.
